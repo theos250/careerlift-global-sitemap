@@ -1,0 +1,20 @@
+name: Extended Blogger feed inventory (read-only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-feeds:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Probe Blogger feed totals, offsets, ordering, and Pages
+        run: python diagnostics/extended_feed_inventory.py
