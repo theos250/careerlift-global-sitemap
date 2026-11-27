@@ -1,18 +1,76 @@
-name: CareerLift Global sitemap deployment (approval-gated)
+name: CareerLift Global sitemap — build and publish
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "careerlift-sitemap/**"
+      - ".github/workflows/careerlift-sitemap.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "careerlift-sitemap/**"
+      - ".github/workflows/careerlift-sitemap.yml"
+  schedule:
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
-# Deployment is intentionally disabled pending explicit approval.
 permissions:
   contents: read
 
+concurrency:
+  group: careerlift-sitemap-pages
+  cancel-in-progress: false
+
 jobs:
-  approval_gate:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - name: Stop until deployment is explicitly authorized
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run offline regression tests
+        run: python -m unittest discover -s careerlift-sitemap/tests -v
+
+      - name: Discover all published posts and generate sitemap
         run: |
-          echo "Deployment is disabled. Use the separate read-only dry-run workflow."
-          echo "A production deployment requires a separately approved workflow change."
-          exit 0
+          python careerlift-sitemap/scripts/generate_sitemap.py \
+            --site "https://www.careerliftglobal.com" \
+            --feed "https://www.careerliftglobal.com/feeds/posts/default?alt=atom&max-results=25" \
+            --static-urls careerlift-sitemap/static-urls.txt \
+            --output public/sitemap.xml \
+            --min-posts 800
+
+      - name: Verify deployment payload
+        run: |
+          test -s public/sitemap.xml
+          python -c "import xml.etree.ElementTree as ET; r=ET.parse('public/sitemap.xml').getroot(); assert r.tag == '{http://www.sitemaps.org/schemas/sitemap/0.9}urlset'; assert len(r) >= 800; print(f'Validated {len(r)} sitemap URLs')"
+          touch public/.nojekyll
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
