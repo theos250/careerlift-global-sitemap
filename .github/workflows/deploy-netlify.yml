@@ -91,15 +91,15 @@ jobs:
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-          GITHUB_DISPATCH_TOKEN: ${{ secrets.GITHUB_DISPATCH_TOKEN }}
-          WEBSUB_SECRET: ${{ secrets.WEBSUB_SECRET }}
         run: |
           set -euo pipefail
           if [ -z "$NETLIFY_AUTH_TOKEN" ] || [ -z "$NETLIFY_SITE_ID" ]; then
             echo "::error::Existing NETLIFY_AUTH_TOKEN and NETLIFY_SITE_ID secrets are required."
             exit 1
           fi
-          args=(--prod --dir=public --functions=netlify/functions --site="$NETLIFY_SITE_ID" --auth="$NETLIFY_AUTH_TOKEN")
-          if [ -n "$GITHUB_DISPATCH_TOKEN" ]; then args+=(--env "GITHUB_DISPATCH_TOKEN=$GITHUB_DISPATCH_TOKEN"); fi
-          if [ -n "$WEBSUB_SECRET" ]; then args+=(--env "WEBSUB_SECRET=$WEBSUB_SECRET"); fi
-          npx --yes netlify-cli@23 deploy "${args[@]}"
+          npx --yes netlify-cli@23 deploy \
+            --prod \
+            --dir=public \
+            --functions=netlify/functions \
+            --site="$NETLIFY_SITE_ID" \
+            --auth="$NETLIFY_AUTH_TOKEN"
