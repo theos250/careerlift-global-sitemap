@@ -93,3 +93,40 @@ class SitemapTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import check_new_posts as detector
+
+
+class NewPostDetectionTests(unittest.TestCase):
+    def test_detects_new_post_missing_from_live_sitemap(self):
+        feed = (
+            f'<feed xmlns="{ATOM}"><entry><id>new-id</id>'
+            '<link rel="alternate" href="https://www.careerliftglobal.com/new-post.html"/>'
+            '</entry></feed>'
+        ).encode()
+        sitemap = (
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            '<url><loc>https://www.careerliftglobal.com/old-post.html</loc></url></urlset>'
+        ).encode()
+        self.assertEqual(
+            detector.has_new_posts(feed, sitemap, "www.careerliftglobal.com"),
+            {"https://www.careerliftglobal.com/new-post.html"},
+        )
+
+    def test_returns_no_change_when_latest_posts_are_already_listed(self):
+        feed = (
+            f'<feed xmlns="{ATOM}"><entry><id>known-id</id>'
+            '<link rel="alternate" href="https://www.careerliftglobal.com/known.html"/>'
+            '</entry></feed>'
+        ).encode()
+        sitemap = (
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            '<url><loc>https://www.careerliftglobal.com/known.html</loc></url></urlset>'
+        ).encode()
+        self.assertEqual(detector.has_new_posts(feed, sitemap, "www.careerliftglobal.com"), set())
+
+    def test_rejects_non_sitemap_live_document(self):
+        with self.assertRaisesRegex(ValueError, "not a valid sitemap"):
+            detector.parse_sitemap_urls(b"<html/>")
