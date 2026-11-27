@@ -4,15 +4,34 @@ from __future__ import annotations
 
 import os
 import sys
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, urlparse, parse_qs
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+import re
 import xml.etree.ElementTree as ET
 
 ATOM = "http://www.w3.org/2005/Atom"
 FEED = "https://www.careerliftglobal.com/feeds/posts/default?alt=atom"
 CALLBACK = "https://effervescent-concha-70a086.netlify.app/.netlify/functions/blogger-websub"
 USER_AGENT = "CareerLiftGlobal-WebSubSubscriber/1.0 (+https://www.careerliftglobal.com/)"
+
+
+def is_expected_topic(value: str) -> bool:
+    try:
+        topic = urlparse(value)
+        query = parse_qs(topic.query)
+        if topic.scheme != "https:" or query.get("alt") != ["atom"]:
+            return False
+        if topic.hostname in {"www.careerliftglobal.com", "careerliftglobal.com"}:
+            return topic.path == "/feeds/posts/default"
+        # Blogger may advertise its canonical numeric blog-feed identifier
+        # on www.blogger.com rather than the custom-domain feed URL.
+        return (
+            topic.hostname == "www.blogger.com"
+            and re.fullmatch(r"/feeds/[0-9]+/posts/default", topic.path) is not None
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 def discover() -> tuple[str, str]:
@@ -45,8 +64,7 @@ def discover() -> tuple[str, str]:
     if parsed_hub.scheme != "https" or parsed_hub.hostname != "pubsubhubbub.appspot.com":
         raise RuntimeError(f"Refusing non-HTTPS or unexpected hub URL: {hub}")
     topic = self_links[0] if self_links else FEED
-    parsed_topic = urlparse(topic)
-    if parsed_topic.scheme != "https" or parsed_topic.hostname not in {"www.careerliftglobal.com", "careerliftglobal.com"}:
+    if not is_expected_topic(topic):
         raise RuntimeError(f"Refusing unexpected Blogger topic URL: {topic}")
     return hub, topic
 
