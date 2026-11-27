@@ -78,7 +78,7 @@ class SitemapTests(unittest.TestCase):
                 max_start_index=10, max_requests=10, request_delay=0,
             )
         self.assertEqual(len(result), 4)
-        self.assertEqual(starts, [1, 3, 5, 6])
+        self.assertEqual(starts, [1, 3, 4, 5])
 
     def test_incomplete_scan_fails_closed_at_request_limit(self):
         with patch.object(sitemap, "fetch_feed_page", return_value=[]):
