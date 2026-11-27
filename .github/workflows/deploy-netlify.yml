@@ -50,7 +50,7 @@ jobs:
           </html>
           EOF
           if [ -f careerlift-sitemap/netlify-verification.html ]; then
-            cp careerlift-sitemap/netlify-verification.html public/
+            cp careerlift-sitemap/netlify-verification.html public/google7d791c87a07882e6.html
           fi
           touch public/.nojekyll
 
