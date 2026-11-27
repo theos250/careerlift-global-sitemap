@@ -1,0 +1,2 @@
+# Add only individually verified, public, indexable static pages.
+# Use each page's exact canonical URL. Leave commented until verified.

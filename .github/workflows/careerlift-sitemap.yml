@@ -1,0 +1,60 @@
+name: CareerLift Global sitemap refresh
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "careerlift-sitemap/**"
+      - ".github/workflows/careerlift-sitemap.yml"
+  schedule:
+    # Poll Blogger's public feed every 15 minutes for newly published posts.
+    - cron: "*/15 * * * *"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: careerlift-sitemap-pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run offline tests
+        run: python -m unittest discover -s careerlift-sitemap/tests -v
+
+      - name: Generate and validate sitemap
+        run: |
+          python careerlift-sitemap/scripts/generate_sitemap.py \
+            --site "https://www.careerliftglobal.com" \
+            --feed "https://www.careerliftglobal.com/feeds/posts/default?alt=atom&max-results=150" \
+            --static-urls careerlift-sitemap/static-urls.txt \
+            --output public/sitemap.xml \
+            --min-posts 800
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+
+      - name: Deploy sitemap
+        id: deployment
+        uses: actions/deploy-pages@v4
