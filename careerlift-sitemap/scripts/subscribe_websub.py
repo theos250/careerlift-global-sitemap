@@ -20,7 +20,7 @@ def is_expected_topic(value: str) -> bool:
     try:
         topic = urlparse(value)
         query = parse_qs(topic.query)
-        if topic.scheme != "https:" or query.get("alt") != ["atom"]:
+        if topic.scheme != "https" or query.get("alt") != ["atom"]:
             return False
         if topic.hostname in {"www.careerliftglobal.com", "careerliftglobal.com"}:
             return topic.path == "/feeds/posts/default"
