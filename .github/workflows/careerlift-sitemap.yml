@@ -40,11 +40,11 @@ jobs:
 
       - name: Generate and validate sitemap
         run: |
-          python careerlift-sitemap/scripts/generate_sitemap.py \\
-            --site "https://www.careerliftglobal.com" \\
-            --feed "https://www.careerliftglobal.com/feeds/posts/default?alt=atom&max-results=150" \\
-            --static-urls careerlift-sitemap/static-urls.txt \\
-            --output public/sitemap.xml \\
+          python careerlift-sitemap/scripts/generate_sitemap.py \
+            --site "https://www.careerliftglobal.com" \
+            --feed "https://www.careerliftglobal.com/feeds/posts/default?alt=atom&max-results=150" \
+            --static-urls careerlift-sitemap/static-urls.txt \
+            --output public/sitemap.xml \
             --min-posts 800
 
       - name: Configure GitHub Pages
