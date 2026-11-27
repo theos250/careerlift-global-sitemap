@@ -3,9 +3,14 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 function isExpectedTopic(value) {
   try {
     const topic = new URL(value);
-    return topic.protocol === "https:" &&
+    const customDomainTopic =
       ["www.careerliftglobal.com", "careerliftglobal.com"].includes(topic.hostname) &&
-      topic.pathname === "/feeds/posts/default" &&
+      topic.pathname === "/feeds/posts/default";
+    const bloggerCanonicalTopic =
+      topic.hostname === "www.blogger.com" &&
+      /^\/feeds\/[0-9]+\/posts\/default$/.test(topic.pathname);
+    return topic.protocol === "https:" &&
+      (customDomainTopic || bloggerCanonicalTopic) &&
       topic.searchParams.get("alt") === "atom";
   } catch {
     return false;
