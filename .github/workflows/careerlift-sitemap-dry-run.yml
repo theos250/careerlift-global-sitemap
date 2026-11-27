@@ -1,0 +1,35 @@
+name: CareerLift Global sitemap dry run
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: careerlift-sitemap-dry-run
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run offline regression tests
+        run: python -m unittest discover -s careerlift-sitemap/tests -v
+      - name: Discover and validate Blogger sitemap without writing files
+        run: |
+          python careerlift-sitemap/scripts/generate_sitemap.py \
+            --site "https://www.careerliftglobal.com" \
+            --feed "https://www.careerliftglobal.com/feeds/posts/default?alt=atom&max-results=25" \
+            --static-urls careerlift-sitemap/static-urls.txt \
+            --min-posts 800 \
+            --dry-run

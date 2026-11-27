@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Build a consolidated XML sitemap from CareerLift Global's public Blogger Atom feed.
 
-Read-only with respect to Blogger. Fails closed on unexpected feed hosts, malformed
-XML, pagination loops, or a suspiciously small post inventory.
+Uses Blogger's observed start-index behavior with overlapping offset windows.
+The generator is read-only with respect to Blogger and fails closed when discovery
+or the minimum inventory safety check cannot be completed.
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
@@ -23,8 +24,14 @@ NS = {"atom": ATOM}
 ET.register_namespace("", SITEMAP)
 
 SITE_URL = "https://www.careerliftglobal.com"
-FEED_URL = SITE_URL + "/feeds/posts/default?alt=atom&max-results=150"
+FEED_URL = SITE_URL + "/feeds/posts/default?alt=atom&max-results=25"
 USER_AGENT = "CareerLiftGlobal-SitemapBot/1.0 (+https://www.careerliftglobal.com/)"
+PAGE_SIZE = 25
+OFFSET_OVERLAP = 5
+EMPTY_OFFSET_LIMIT = 20
+MAX_START_INDEX = 5000
+MAX_REQUESTS = 600
+REQUEST_DELAY_SECONDS = 0.15
 
 
 def canonicalize(url: str, canonical_host: str) -> str | None:
@@ -55,48 +62,68 @@ def parse_timestamp(value: str | None) -> str | None:
         return None
 
 
-def fetch_xml(url: str, allowed_feed_hosts: set[str]) -> bytes:
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or not parsed.hostname or parsed.hostname.lower() not in allowed_feed_hosts:
-        raise RuntimeError(f"Refusing unexpected feed/pagination host: {url}")
-    request = Request(url, headers={
+def build_offset_url(feed_url: str, start_index: int, page_size: int) -> str:
+    parsed = urlparse(feed_url)
+    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    params.update({"alt": "atom", "max-results": str(page_size), "start-index": str(start_index)})
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, urlencode(params), ""))
+
+
+def fetch_feed_page(feed_url: str, start_index: int, page_size: int) -> list[ET.Element]:
+    parsed = urlparse(feed_url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise RuntimeError("Blogger feed URL must use HTTPS and include a hostname")
+    allowed_hosts = {parsed.hostname.lower(), "www.blogger.com", "blogger.com"}
+    request_url = build_offset_url(feed_url, start_index, page_size)
+    request = Request(request_url, headers={
         "User-Agent": USER_AGENT,
         "Accept": "application/atom+xml, application/xml, text/xml",
     })
     with urlopen(request, timeout=30) as response:
+        final = urlparse(response.geturl())
         if response.status != 200:
-            raise RuntimeError(f"Feed returned HTTP {response.status}: {url}")
-        return response.read()
-
-
-def discover_posts(feed_url: str, canonical_host: str, max_pages: int = 100) -> dict[str, str | None]:
-    initial_host = urlparse(feed_url).hostname
-    if not initial_host:
-        raise RuntimeError("Blogger feed URL has no hostname")
-    # Blogger may rewrite paginated Atom links to its canonical feed host.
-    allowed_feed_hosts = {initial_host.lower(), "www.blogger.com", "blogger.com"}
-    posts: dict[str, str | None] = {}
-    visited: set[str] = set()
-    current: str | None = feed_url
-    page_count = 0
-
-    while current:
-        if current in visited:
-            raise RuntimeError(f"Atom pagination loop detected: {current}")
-        visited.add(current)
-        page_count += 1
-        if page_count > max_pages:
-            raise RuntimeError(f"Feed exceeded safety limit of {max_pages} pages")
-
+            raise RuntimeError(f"Feed returned HTTP {response.status}: {request_url}")
+        if final.scheme != "https" or not final.hostname or final.hostname.lower() not in allowed_hosts:
+            raise RuntimeError(f"Refusing unexpected feed redirect host: {response.geturl()}")
         try:
-            root = ET.fromstring(fetch_xml(current, allowed_feed_hosts))
+            root = ET.fromstring(response.read())
         except ET.ParseError as exc:
-            raise RuntimeError(f"Invalid Atom XML at {current}: {exc}") from exc
+            raise RuntimeError(f"Invalid Atom XML at {request_url}: {exc}") from exc
+    if root.tag != f"{{{ATOM}}}feed":
+        raise RuntimeError(f"Expected Atom feed, received {root.tag!r}")
+    return root.findall("atom:entry", NS)
 
-        if root.tag != f"{{{ATOM}}}feed":
-            raise RuntimeError(f"Expected Atom feed, received {root.tag!r}")
 
-        for entry in root.findall("atom:entry", NS):
+def discover_posts(
+    feed_url: str,
+    canonical_host: str,
+    *,
+    page_size: int = PAGE_SIZE,
+    overlap: int = OFFSET_OVERLAP,
+    empty_offset_limit: int = EMPTY_OFFSET_LIMIT,
+    max_start_index: int = MAX_START_INDEX,
+    max_requests: int = MAX_REQUESTS,
+    request_delay: float = REQUEST_DELAY_SECONDS,
+) -> dict[str, str | None]:
+    """Discover published posts with overlapping direct start-index requests."""
+    if page_size < 2 or overlap < 1 or overlap >= page_size:
+        raise ValueError("Require page_size >= 2 and 1 <= overlap < page_size")
+    posts: dict[str, str | None] = {}
+    seen_entry_ids: set[str] = set()
+    start_index = 1
+    empty_streak = 0
+    requests = 0
+
+    while start_index <= max_start_index and requests < max_requests and empty_streak < empty_offset_limit:
+        entries = fetch_feed_page(feed_url, start_index, page_size)
+        requests += 1
+        empty_streak = 0 if entries else empty_streak + 1
+
+        for entry in entries:
+            entry_id = (entry.findtext("atom:id", default="", namespaces=NS) or "").strip()
+            if entry_id:
+                seen_entry_ids.add(entry_id)
+
             links = entry.findall("atom:link", NS)
             href = next(
                 (link.attrib.get("href") for link in links
@@ -110,17 +137,25 @@ def discover_posts(feed_url: str, canonical_host: str, max_pages: int = 100) -> 
             if loc not in posts or (updated and (not posts[loc] or updated > posts[loc])):
                 posts[loc] = updated
 
-        current = next(
-            (link.attrib["href"] for link in root.findall("atom:link", NS)
-             if link.attrib.get("rel") == "next" and link.attrib.get("href")),
-            None,
-        )
-        if current:
-            parsed_next = urlparse(current)
-            if parsed_next.scheme != "https" or not parsed_next.hostname or parsed_next.hostname.lower() not in allowed_feed_hosts:
-                raise RuntimeError(f"Unexpected Atom next-link host: {current}")
-        time.sleep(0.1)
+        # Retain overlap. When Blogger returns <= overlap entries, probe the
+        # next offset individually instead of jumping over sparse feed ranges.
+        step = max(1, len(entries) - overlap) if entries else 1
+        start_index += step
+        if request_delay:
+            time.sleep(request_delay)
 
+    if empty_streak < empty_offset_limit:
+        raise RuntimeError(
+            "Feed discovery did not reach the required consecutive-empty stopping condition "
+            f"(requests={requests}, next_start_index={start_index}, empty_streak={empty_streak}). "
+            "Refusing to treat a partial scan as complete."
+        )
+    if not posts:
+        raise RuntimeError("Feed discovery returned no canonical CareerLift post URLs")
+    print(
+        f"Feed scan: {requests} requests; {len(seen_entry_ids)} unique Blogger entry IDs; "
+        f"{len(posts)} canonical post URLs; stopped after {empty_streak} empty offsets."
+    )
     return posts
 
 
@@ -143,7 +178,6 @@ def build_xml(posts: dict[str, str | None], static_urls: list[str]) -> bytes:
     merged = dict(posts)
     for loc in static_urls:
         merged.setdefault(loc, None)
-
     urlset = ET.Element(f"{{{SITEMAP}}}urlset")
     for loc in sorted(merged):
         item = ET.SubElement(urlset, f"{{{SITEMAP}}}url")
@@ -160,10 +194,12 @@ def main() -> int:
     parser.add_argument("--static-urls", default="careerlift-sitemap/static-urls.txt")
     parser.add_argument("--output", default="public/sitemap.xml")
     parser.add_argument("--min-posts", type=int, default=int(os.getenv("MIN_EXPECTED_POSTS", "800")))
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Validate the complete sitemap without writing an output file.")
     args = parser.parse_args()
 
     site = urlparse(args.site)
-    if site.scheme != "https" or not site.hostname:
+    if site.scheme != "https" or not site.hostname or site.path not in {"", "/"}:
         raise SystemExit("--site must be an HTTPS origin")
     host = site.hostname.lower()
 
@@ -172,11 +208,10 @@ def main() -> int:
         if len(posts) < args.min_posts:
             raise RuntimeError(
                 f"Safety check failed: found {len(posts)} unique posts; "
-                f"minimum is {args.min_posts}. Existing published output will not be replaced."
+                f"minimum is {args.min_posts}. No output will be written."
             )
         static_urls = read_static_urls(Path(args.static_urls), host)
         xml_bytes = build_xml(posts, static_urls)
-
         root = ET.fromstring(xml_bytes)
         if root.tag != f"{{{SITEMAP}}}urlset":
             raise RuntimeError("Generated document is not a sitemap urlset")
@@ -184,12 +219,18 @@ def main() -> int:
         if not count or count > 50_000:
             raise RuntimeError(f"Invalid sitemap URL count: {count}")
 
+        if args.dry_run:
+            print(f"PASS: {len(posts)} unique published post URLs")
+            print(f"PASS: {len(static_urls)} configured static URLs")
+            print(f"PASS: {count} unique URLs validated; dry-run wrote no files")
+            print("PASS: XML parses with the official sitemap namespace")
+            return 0
+
         output = Path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)
         temp = output.with_suffix(output.suffix + ".tmp")
         temp.write_bytes(xml_bytes)
         temp.replace(output)
-
         print(f"PASS: {len(posts)} unique published post URLs")
         print(f"PASS: {len(static_urls)} configured static URLs")
         print(f"PASS: {count} unique URLs written to {output}")
