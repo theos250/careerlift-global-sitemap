@@ -2,6 +2,8 @@ name: Deploy CareerLift Global sitemap to Netlify
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: read
@@ -28,16 +30,34 @@ jobs:
       - name: Run offline regression tests
         run: python -m unittest discover -s careerlift-sitemap/tests -v
 
-      - name: Discover published posts and generate sitemap
+      - name: Check Blogger latest feed for new posts
+        id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          python careerlift-sitemap/scripts/generate_sitemap.py \
-            --site "https://www.careerliftglobal.com" \
-            --feed "https://www.careerliftglobal.com/feeds/posts/default?alt=atom&max-results=25" \
-            --static-urls careerlift-sitemap/static-urls.txt \
-            --output public/sitemap.xml \
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Manual run: forcing a complete sitemap rebuild."
+          else
+            python careerlift-sitemap/scripts/check_new_posts.py \\
+              --site "https://www.careerliftglobal.com" \\
+              --feed "https://www.careerliftglobal.com/feeds/posts/default?alt=atom&max-results=25" \\
+              --sitemap "https://effervescent-concha-70a086.netlify.app/sitemap.xml" | tee detection.log
+            grep -q '^changed=true$' detection.log && echo "changed=true" >> "$GITHUB_OUTPUT" || echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Discover published posts and generate sitemap
+        if: steps.detect.outputs.changed == 'true'
+        run: |
+          python careerlift-sitemap/scripts/generate_sitemap.py \\
+            --site "https://www.careerliftglobal.com" \\
+            --feed "https://www.careerliftglobal.com/feeds/posts/default?alt=atom&max-results=25" \\
+            --static-urls careerlift-sitemap/static-urls.txt \\
+            --output public/sitemap.xml \\
             --min-posts 800
 
       - name: Validate sitemap payload
+        if: steps.detect.outputs.changed == 'true'
         run: |
           test -s public/sitemap.xml
           python -c "import xml.etree.ElementTree as ET; r=ET.parse('public/sitemap.xml').getroot(); assert r.tag == '{http://www.sitemaps.org/schemas/sitemap/0.9}urlset'; assert len(r) >= 800; print(f'Validated {len(r)} sitemap URLs')"
@@ -55,6 +75,7 @@ jobs:
           touch public/.nojekyll
 
       - name: Deploy to Netlify
+        if: steps.detect.outputs.changed == 'true'
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
@@ -63,8 +84,8 @@ jobs:
             echo "::error::Add NETLIFY_AUTH_TOKEN and NETLIFY_SITE_ID repository secrets before running this workflow."
             exit 1
           fi
-          npx --yes netlify-cli@23 deploy \
-            --prod \
-            --dir=public \
-            --site="$NETLIFY_SITE_ID" \
+          npx --yes netlify-cli@23 deploy \\
+            --prod \\
+            --dir=public \\
+            --site="$NETLIFY_SITE_ID" \\
             --auth="$NETLIFY_AUTH_TOKEN"
