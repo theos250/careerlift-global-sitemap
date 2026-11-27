@@ -121,8 +121,6 @@ def discover_posts(
 
         for entry in entries:
             entry_id = (entry.findtext("atom:id", default="", namespaces=NS) or "").strip()
-            if entry_id and entry_id in seen_entry_ids:
-                continue
             if entry_id:
                 seen_entry_ids.add(entry_id)
 
