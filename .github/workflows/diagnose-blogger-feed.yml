@@ -1,0 +1,23 @@
+name: Blogger feed pagination diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-feed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Inspect Blogger Atom pagination (read-only)
+        run: |
+          python careerlift-sitemap/scripts/diagnose_blogger_feed.py \
+            --feed "https://www.careerliftglobal.com/feeds/posts/default?alt=atom&max-results=150" \
+            --max-pages 100
