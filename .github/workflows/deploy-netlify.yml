@@ -2,6 +2,13 @@ name: Deploy CareerLift Global sitemap to Netlify
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "netlify/functions/**"
+      - "careerlift-sitemap/scripts/**"
+      - "careerlift-sitemap/static-urls.txt"
+      - ".github/workflows/deploy-netlify.yml"
   schedule:
     - cron: "*/5 * * * *"
 
@@ -35,15 +42,20 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "schedule" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Manual run: forcing a complete sitemap rebuild."
+            echo "Manual or code-change run: forcing a complete sitemap rebuild and function deployment."
           else
             python careerlift-sitemap/scripts/check_new_posts.py \\
               --site "https://www.careerliftglobal.com" \\
               --feed "https://www.careerliftglobal.com/feeds/posts/default?alt=atom&max-results=25" \\
               --sitemap "https://effervescent-concha-70a086.netlify.app/sitemap.xml" | tee detection.log
-            grep -q '^changed=true$' detection.log && echo "changed=true" >> "$GITHUB_OUTPUT" || echo "changed=false" >> "$GITHUB_OUTPUT"
+            if grep -q '^changed=true$' detection.log; then
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Discover published posts and generate sitemap
@@ -74,18 +86,20 @@ jobs:
           fi
           touch public/.nojekyll
 
-      - name: Deploy to Netlify
+      - name: Deploy sitemap and WebSub callback to Netlify
         if: steps.detect.outputs.changed == 'true'
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          GITHUB_DISPATCH_TOKEN: ${{ secrets.GITHUB_DISPATCH_TOKEN }}
+          WEBSUB_SECRET: ${{ secrets.WEBSUB_SECRET }}
         run: |
+          set -euo pipefail
           if [ -z "$NETLIFY_AUTH_TOKEN" ] || [ -z "$NETLIFY_SITE_ID" ]; then
-            echo "::error::Add NETLIFY_AUTH_TOKEN and NETLIFY_SITE_ID repository secrets before running this workflow."
+            echo "::error::Existing NETLIFY_AUTH_TOKEN and NETLIFY_SITE_ID secrets are required."
             exit 1
           fi
-          npx --yes netlify-cli@23 deploy \\
-            --prod \\
-            --dir=public \\
-            --site="$NETLIFY_SITE_ID" \\
-            --auth="$NETLIFY_AUTH_TOKEN"
+          args=(--prod --dir=public --functions=netlify/functions --site="$NETLIFY_SITE_ID" --auth="$NETLIFY_AUTH_TOKEN")
+          if [ -n "$GITHUB_DISPATCH_TOKEN" ]; then args+=(--env "GITHUB_DISPATCH_TOKEN=$GITHUB_DISPATCH_TOKEN"); fi
+          if [ -n "$WEBSUB_SECRET" ]; then args+=(--env "WEBSUB_SECRET=$WEBSUB_SECRET"); fi
+          npx --yes netlify-cli@23 deploy "${args[@]}"
