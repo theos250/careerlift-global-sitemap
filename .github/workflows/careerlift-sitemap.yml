@@ -49,9 +49,39 @@ jobs:
             --output public/sitemap.xml \
             --min-posts 800
 
+      - name: Create GitHub Pages project homepage
+        run: |
+          cat > public/index.html <<'EOF'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta name="robots" content="noindex,follow">
+            <title>CareerLift Global — Sitemap Service</title>
+            <style>
+              body { margin: 0; padding: 3rem 1.25rem; font: 16px/1.6 system-ui, sans-serif; color: #172033; background: #f5f7fb; }
+              main { max-width: 680px; margin: 8vh auto; padding: 2rem; background: #fff; border: 1px solid #e5e9f2; border-radius: 16px; }
+              h1 { margin-top: 0; font-size: clamp(1.7rem, 5vw, 2.4rem); }
+              a { display: inline-block; margin-top: 1rem; color: #155eef; font-weight: 650; }
+              p { color: #475467; }
+            </style>
+          </head>
+          <body>
+            <main>
+              <h1>CareerLift Global Sitemap Service</h1>
+              <p>This service provides an automatically generated sitemap of published CareerLift Global articles to help search engines discover website content.</p>
+              <a href="sitemap.xml">View the XML sitemap</a>
+            </main>
+          </body>
+          </html>
+          EOF
+
       - name: Verify deployment payload
         run: |
+          test -s public/index.html
           test -s public/sitemap.xml
+          python -c "from pathlib import Path; p=Path('public/index.html').read_text(); assert 'href=\"sitemap.xml\"' in p; print('Validated project homepage and relative sitemap link')"
           python -c "import xml.etree.ElementTree as ET; r=ET.parse('public/sitemap.xml').getroot(); assert r.tag == '{http://www.sitemaps.org/schemas/sitemap/0.9}urlset'; assert len(r) >= 800; print(f'Validated {len(r)} sitemap URLs')"
           touch public/.nojekyll
 
