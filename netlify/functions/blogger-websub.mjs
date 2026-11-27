@@ -1,6 +1,16 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-const TOPIC = "https://www.careerliftglobal.com/feeds/posts/default?alt=atom";
+function isExpectedTopic(value) {
+  try {
+    const topic = new URL(value);
+    return topic.protocol === "https:" &&
+      ["www.careerliftglobal.com", "careerliftglobal.com"].includes(topic.hostname) &&
+      topic.pathname === "/feeds/posts/default" &&
+      topic.searchParams.get("alt") === "atom";
+  } catch {
+    return false;
+  }
+}
 const OWNER = "theos250";
 const REPO = "careerlift-global-sitemap";
 const WORKFLOW = "deploy-netlify.yml";
@@ -30,7 +40,7 @@ export default async (request) => {
     const mode = url.searchParams.get("hub.mode");
     const topic = url.searchParams.get("hub.topic");
     const challenge = url.searchParams.get("hub.challenge");
-    if (!["subscribe", "unsubscribe"].includes(mode) || topic !== TOPIC || !challenge) {
+    if (!["subscribe", "unsubscribe"].includes(mode) || !isExpectedTopic(topic || "") || !challenge) {
       return response(400, "Invalid WebSub verification request");
     }
     return response(200, challenge);
