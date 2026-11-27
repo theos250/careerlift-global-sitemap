@@ -1,0 +1,70 @@
+name: Deploy CareerLift Global sitemap to Netlify
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: careerlift-sitemap-netlify
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run offline regression tests
+        run: python -m unittest discover -s careerlift-sitemap/tests -v
+
+      - name: Discover published posts and generate sitemap
+        run: |
+          python careerlift-sitemap/scripts/generate_sitemap.py \
+            --site "https://www.careerliftglobal.com" \
+            --feed "https://www.careerliftglobal.com/feeds/posts/default?alt=atom&max-results=25" \
+            --static-urls careerlift-sitemap/static-urls.txt \
+            --output public/sitemap.xml \
+            --min-posts 800
+
+      - name: Validate sitemap payload
+        run: |
+          test -s public/sitemap.xml
+          python -c "import xml.etree.ElementTree as ET; r=ET.parse('public/sitemap.xml').getroot(); assert r.tag == '{http://www.sitemaps.org/schemas/sitemap/0.9}urlset'; assert len(r) >= 800; print(f'Validated {len(r)} sitemap URLs')"
+          mkdir -p public
+          cat > public/index.html <<'EOF'
+          <!doctype html>
+          <html lang="en">
+          <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,follow"><title>CareerLift Global Sitemap</title></head>
+          <body><main><h1>CareerLift Global Sitemap</h1><p>Automatically generated sitemap of published CareerLift Global blog posts.</p><a href="/sitemap.xml">View XML sitemap</a></main></body>
+          </html>
+          EOF
+          if [ -f careerlift-sitemap/netlify-verification.html ]; then
+            cp careerlift-sitemap/netlify-verification.html public/
+          fi
+          touch public/.nojekyll
+
+      - name: Deploy to Netlify
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          if [ -z "$NETLIFY_AUTH_TOKEN" ] || [ -z "$NETLIFY_SITE_ID" ]; then
+            echo "::error::Add NETLIFY_AUTH_TOKEN and NETLIFY_SITE_ID repository secrets before running this workflow."
+            exit 1
+          fi
+          npx --yes netlify-cli@23 deploy \
+            --prod \
+            --dir=public \
+            --site="$NETLIFY_SITE_ID" \
+            --auth="$NETLIFY_AUTH_TOKEN"
