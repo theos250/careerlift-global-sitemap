@@ -34,6 +34,40 @@ This URL is not live until the repository's Pages publishing source is set to
 Build and deployment → Source, select **GitHub Actions**. No custom domain or
 DNS change is required.
 
+### Netlify alternative hosting (manual first deployment)
+
+A separate, manual-only workflow is available at
+`.github/workflows/deploy-netlify.yml`. It rebuilds and validates the same
+posts-only sitemap, then deploys the `public/` directory to a Netlify site.
+It does not replace or disable the existing GitHub Pages workflow.
+
+To enable it:
+
+1. Create a Netlify account and a new site using a provider-owned
+   `netlify.app` subdomain. Do not add a custom domain.
+2. In Netlify, obtain the site's Site ID from Site configuration → General →
+   Site details.
+3. Create a Netlify personal access token.
+4. In GitHub, open this repository's Settings → Secrets and variables →
+   Actions → New repository secret. Add:
+   - `NETLIFY_AUTH_TOKEN` — the Netlify personal access token.
+   - `NETLIFY_SITE_ID` — the Netlify Site ID.
+5. After the workflow is merged into `main`, run Actions → Deploy CareerLift
+   Global sitemap to Netlify → Run workflow.
+
+The first deployment is intentionally manual. It must be tested from the
+publisher's computer and mobile connection before any robots.txt or Search
+Console change. To support Google HTML-file verification of the Netlify
+URL-prefix property, place Google's downloaded verification HTML file at
+`careerlift-sitemap/netlify-verification.html` and commit it before deploying.
+The workflow copies that file to the deployed site's root.
+
+Once the Netlify URL is verified and Google ownership verification is complete,
+the sitemap can be submitted cross-site using Google's documented process.
+Do not remove the existing GitHub Pages deployment or change Blogger's
+robots.txt until the Netlify endpoint and Search Console processing are
+confirmed.
+
 ## Blogger sitemap preservation
 
 This external sitemap is posts-only. It does not modify Blogger or replace
