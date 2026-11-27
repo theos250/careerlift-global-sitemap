@@ -18,6 +18,6 @@ jobs:
           python-version: "3.12"
       - name: Inspect Blogger Atom pagination (read-only)
         run: |
-          python careerlift-sitemap/scripts/diagnose_blogger_feed.py \
+          python diagnostics/diagnose_blogger_feed.py \
             --feed "https://www.careerliftglobal.com/feeds/posts/default?alt=atom&max-results=150" \
             --max-pages 100
