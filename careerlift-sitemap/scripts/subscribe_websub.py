@@ -37,8 +37,13 @@ def discover() -> tuple[str, str]:
         raise RuntimeError("Blogger's Atom feed did not advertise a rel=hub endpoint; refusing to guess a hub")
     hub = hubs[0]
     parsed_hub = urlparse(hub)
-    if parsed_hub.scheme != "https" or not parsed_hub.hostname:
-        raise RuntimeError(f"Refusing non-HTTPS or invalid hub URL: {hub}")
+    # Blogger currently advertises Google's legacy hub over HTTP. Prefer the
+    # documented HTTPS endpoint rather than sending subscription secrets over HTTP.
+    if parsed_hub.scheme == "http" and parsed_hub.hostname == "pubsubhubbub.appspot.com":
+        hub = parsed_hub._replace(scheme="https").geturl()
+        parsed_hub = urlparse(hub)
+    if parsed_hub.scheme != "https" or parsed_hub.hostname != "pubsubhubbub.appspot.com":
+        raise RuntimeError(f"Refusing non-HTTPS or unexpected hub URL: {hub}")
     topic = self_links[0] if self_links else FEED
     parsed_topic = urlparse(topic)
     if parsed_topic.scheme != "https" or parsed_topic.hostname not in {"www.careerliftglobal.com", "careerliftglobal.com"}:
